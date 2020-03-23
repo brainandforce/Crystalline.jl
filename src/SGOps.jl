@@ -84,7 +84,7 @@ export parseisoir, parselittlegroupirreps,
        littlegroupirrep, klabel
 
 include("special_representation_domain_kpoints.jl")
-export ΦnotΩ_kvecs
+export ΦnotΩ_kvecs, add_ΦnotΩ_lgirs!
 
 include("littlegroup_irreps.jl")
 export get_lgirreps, get_littlegroups,
