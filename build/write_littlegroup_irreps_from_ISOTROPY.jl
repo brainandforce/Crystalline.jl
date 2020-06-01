@@ -1,4 +1,4 @@
-using SGOps, JLD2
+using Crystalline, JLD2
 
 """
     __write_littlegroupirreps(LGIRS::Vector{Vector{NTuple{N,LGIrrep}}})

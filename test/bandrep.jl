@@ -1,4 +1,4 @@
-using SGOps, Test
+using Crystalline, Test
 
 if !isdefined(Main, :LGIRS)
     LGIRS = get_all_lgirreps(Val(3))  # loaded from our saved .jld2 files
@@ -12,11 +12,11 @@ verbose = false
 @testset "Complex (no TR) irreps" begin
 # --- test complex-form irreps (not assuming time-reversal symmetry) ---
 for (sgnum, lgirsvec) in enumerate(LGIRS)
-    BRS = bandreps(sgnum, allpaths, spinful, "Elementary")
-    irlabs_BRS = BRS.irreplabs
-    klabs_BRS = BRS.klabs
+    BRS = bandreps(sgnum, allpaths=allpaths, spinful=spinful, timereversal=false)
+    irlabs_BRS = irreplabels(BRS)
+    klabs_BRS = klabels(BRS)
 
-    irlabs_ISO = [SGOps.formatirreplabel(label(lgir)) for lgirs in lgirsvec for lgir in lgirs]
+    irlabs_ISO = [Crystalline.formatirreplabel(label(lgir)) for lgirs in lgirsvec for lgir in lgirs]
     klabs_ISO = [klabel(lgirs[1]) for lgirs in lgirsvec]
 
     for (iridx_BRS, irlab_BRS) in enumerate(irlabs_BRS)
@@ -59,20 +59,20 @@ end
 @testset "Physically irreducible irreps/co-reps (with TR)" begin
 # --- test physically irreducible irreps/co-reps (assuming time-reversal symmetry) ---
 for (sgnum, lgirsvec) in enumerate(LGIRS)
-    BRS = bandreps(sgnum, allpaths, spinful, "Elementary TR")
-    irlabs_BRS = BRS.irreplabs
-    klabs_BRS = BRS.klabs
+    BRS = bandreps(sgnum, allpaths=allpaths, spinful=spinful, timereversal=true)
+    irlabs_BRS = irreplabels(BRS)
+    klabs_BRS = klabels(BRS)
 
     irlabs_ISO = Vector{String}()
     realirlabs_ISO = Vector{String}()
     klabs_ISO = Vector{String}(undef, length(lgirsvec))
     for (kidx, lgirs) in enumerate(lgirsvec)
         append!(irlabs_ISO,     [label(lgir) for lgir in lgirs])
-        append!(realirlabs_ISO, realify(lgirs)[2])
+        append!(realirlabs_ISO, label.(realify(lgirs)))
         klabs_ISO[kidx] = klabel(first(lgirs))
     end
-    irlabs_ISO = SGOps.formatirreplabel.(irlabs_ISO)
-    realirlabs_ISO = SGOps.formatirreplabel.(realirlabs_ISO)
+    irlabs_ISO = Crystalline.formatirreplabel.(irlabs_ISO)
+    realirlabs_ISO = Crystalline.formatirreplabel.(realirlabs_ISO)
 
     for (iridx_BRS, irlab_BRS) in enumerate(irlabs_BRS)
         klab_BRS = klabel(irlab_BRS)

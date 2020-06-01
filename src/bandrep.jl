@@ -1,112 +1,16 @@
-struct BandRepTrait end
-
-# crawling functionality
-const BANDREP_URL="http://www.cryst.ehu.es/cgi-bin/cryst/programs/bandrep.pl"
-"""
-    crawlbandreps(sgnum::Integer, allpaths::Bool=false, brtype::String="Elementary TR")
-                                                       --> ::String (valid HTML table)
-    
-Crawls a band representation (BR) from the Bilbao database. This is achieved
-by sending a 'POST' request to the <form> ... </form> part of their HTML page.
-
-**Input**:
-- `sgnum`    : Space group number 
-- `allpaths` : Whether to include only maximal **k**-points (true) or 
-                all, i.e. general, **k**-points (true)
-- `brtype`   : Type of bandrep, as string, either
-    - "Elementary TR" : Elementary BR, with time-reversal assumed
-    - "Elementary"    : Elementary BR, without time-reversal symmetry 
-    (we do not presently try to crawl Wyckoff-type inputs)
-
-**Output**: Valid HTML <table> ... </table> for the requested BR.
-"""
-function crawlbandreps(sgnum::Integer, allpaths::Bool=false, brtype::String="Elementary TR")
-    if brtype != "Elementary TR" && brtype != "Elementary"
-        error(ArgumentError("String 'brtype' must be 'Elementary TR' or 'Elementary', was '$(brtype)'"))
-    else
-        brtypename = lowercasefirst(filter(!isspace, brtype))
-    end
-    
-    inputs = "super=$(sgnum)&"*                     # inputs to <form> ... </form>, in POST mode; 
-             "$(brtypename)=$(brtype)&"*            # inputs are supplied as name=value pairs, 
-             "nomaximal=$(allpaths ? "yes" : "no")" # with distinct inputs separated by '&' 
-                                                    # (see e.g. https://stackoverflow.com/a/8430062/9911781)
-    response = HTTP.post(BANDREP_URL, [], inputs)
-    body = String(response.body)
-    startstring = r"\<tr\>\<td(?:.*?)\>Wyckoff pos."
-    startidx=findfirst(startstring, body)[1]
-    stopidx=findlast("</td></tr></table>",body)[end]
-    table_html="<table>"*body[startidx:stopidx]
-
-    return table_html
-end
-
-# parsing functionality
-function html2dlm(body::String, oplus::Union{String,Char}='⊕', ::BandRepTrait=BandRepTrait())
-    dlm='|'
-    # list of replacements, mostly using regexes; see https://regexr.com for inspiration.
-    replacepairlist= (
-        r"\<tr\>(.*?)\<\/tr\>" => SubstitutionString("\\1\n"), # rows; newline-separated (requires ugly hack around https://github.com/JuliaLang/julia/issues/27125 to escape \n)
-        "<tr>"=>"\n",                           # <tr> tags are not always paired with </tr>; second pass here to remove stragglers
-        r"\<td(?:.*?)\>(.*?)\<\/td\>" => SubstitutionString("\\1$(dlm)"), # columns; comma-separated
-        r"\<sup\>(.*?)\<\/sup\>" => x->supscriptify(x[6:end-6]), # superscripts (convert to unicode)
-        r"\<sub\>(.*?)\<\/sub\>" => x->subscriptify(x[6:end-6]), # subscripts   (convert to unicode)
-        r"\<i\>(.*?)\<\/i\>"=>s"\1",            # italic annotations
-        r"\<center\>(.*?)\<\/center\>"=>s"\1",  # centering annotations
-        "<br>"=>"",                             # linebreak tag in html; no </br> tag exists
-        "<font size=\"5\">&uarr;</font>"=>"↑",  # induction arrow
-        r"\<font style\=\"text-decoration:overline;\"\>(.*?)\<\/font\>"=>s"\1ˢ", # spinful irrep
-        "&oplus;"=>oplus,                       # special symbols # ⊕
-        "&Gamma;"=>'Γ',                                           # Γ
-        "&Sigma;"=>'Σ',                                           # Σ
-        "&Lambda;"=>'Λ',                                          # Λ
-        "&Delta;"=>'Δ',                                           # Δ
-        "GP"=>'Ω',                                                # GP to Ω
-        "&nbsp;"=>"",                                             # non-breaking space
-        '*'=>"",                                                  # * (for Σ k-points in e.g. sg 146: sending `u,-2*u,0`⇒`u,-2u,0`)
-        r"\<form.*?\"Decomposable\"\>\<\/form\>"=>"Decomposable", # decomposable bandreps contain a link to decompositions; ignore it
-        "$(dlm)Decomposable"=>"$(dlm)true",    # simplify statement of composability
-        "$(dlm)Indecomposable"=>"$(dlm)false",
-        "\\Indecomposable"=>"",
-        "<table>"=>"","</table>"=>"",           # get rid of table tags
-        "$(dlm)\n"=>"\n",                       # if the last bits of a line is ", ", get rid of it
-        r"\n\s*\Z"=>"",                         # if the last char in the string is a newline (possibly with spurious spaces), get rid of it
-        r"\n\s+"=>"\n",                         # remove spurious white/space at start of any lines
-        #r"((_.){2,})"=>(x)->"_{"*replace(x,"_"=>"")*"}",  # tidy up multi-index subscripts
-        #r"((\^.){2,})"=>(x)->"^{"*replace(x,"^"=>"")*"}"  # tidy up multi-index superscripts
-    )
-
-    for replacepair in replacepairlist
-        body = replace(body, replacepair)
-    end
-
-    return body
-end
-
-# utilities for conversion between different textual/array/struct representations
-function html2array(body)
-    str = html2dlm(body, BandRepTrait()) 
-    M = dlm2array(str);
-end
-
-function html2struct(body::String, sgnum::Integer, allpaths::Bool=false, spinful::Bool=false, 
-                     brtype::String="Elementary TR", ::BandRepTrait=BandRepTrait())
-    M = html2array(body)
-    array2struct(M, sgnum, allpaths, spinful, brtype, BandRepTrait())
-end
-
-dlm2array(str::String) = DelimitedFiles.readdlm(IOBuffer(str), '|', String, '\n')
+# conversion between delimited text files and array representations
 dlm2array(io::IO) = DelimitedFiles.readdlm(io, '|', String, '\n')
+dlm2array(str::String) = dlm2array(IOBuffer(str))
 
-# utilities for creation of BandRepStruct 
+# utilities for creation of BandRep and BandRepSet
 function dlm2struct(str::Union{String,IO}, sgnum::Integer, allpaths::Bool=false, spinful::Bool=false, 
-                    brtype::String="Elementary TR", ::BandRepTrait=BandRepTrait())
+                    timereversal::Bool=true)
     M = dlm2array(str);
-    array2struct(M, sgnum, allpaths, spinful, brtype, BandRepTrait())
+    array2struct(M, sgnum, allpaths, spinful, timereversal)
 end
 
 function array2struct(M::Matrix{String}, sgnum::Integer, allpaths::Bool=false, spinful::Bool=false, 
-                      brtype::String="Elementary TR", ::BandRepTrait=BandRepTrait())
+                      timereversal::Bool=true)
 
     klist =  permutedims(mapreduce(x->String.(split(x,":")), hcat, M[4:end,1])) # 1ˢᵗ col is labels, 2ⁿᵈ col is coordinates as strings
     klabs, kvs = (@view klist[:,1]), KVec.(@view klist[:,2])
@@ -123,40 +27,44 @@ function array2struct(M::Matrix{String}, sgnum::Integer, allpaths::Bool=false, s
     for br in brtags 
         br .= replace.(br, Ref(r"\([1-9]\)"=>""))  # get rid of irrep dimension info
     end
-    if !spinful 
+    # A BandRepSet can either reference single-valued or double-valued irreps, not both; 
+    # thus, we "throw out" one of the two here, depending on `spinful`.
+    if spinful  # double-valued irreps only (spinful systems)
+        delidxs = findall(map(!isspinful, brtags))
+    else        # single-valued irreps only (spinless systems)
         delidxs = findall(map(isspinful, brtags))
-        for vars in (brtags, wyckpos, sitesym, label, dim, decomposable)
-            deleteat!(vars, delidxs)    
-        end
     end
-    irreplabs, irrepvecs = get_irrepvecs(brtags)              
+    for vars in (brtags, wyckpos, sitesym, label, dim, decomposable)
+        deleteat!(vars, delidxs) 
+    end
+    irlabs, irvecs = get_irrepvecs(brtags)              
 
-    BRs = BandRep.(wyckpos, sitesym, label, dim, decomposable, 
-                   map(isspinful, brtags), irrepvecs, brtags)
+    BRs = BandRep.(wyckpos, sitesym, label, dim, decomposable, map(isspinful, brtags), 
+                   irvecs, brtags)
 
     
-    return BandRepSet(sgnum, BRs, kvs, klabs, irreplabs, allpaths, spinful, occursin("TR", brtype))
+    return BandRepSet(sgnum, BRs, kvs, klabs, irlabs, allpaths, spinful, timereversal)
 end
 
 
 function get_irrepvecs(brtags)
     Nklabs = length(first(brtags)) # there's equally many (composite) irrep tags in each band representation
-    irreplabs = Vector{String}()
+    irlabs = Vector{String}()
     for kidx in Base.OneTo(Nklabs)
-        irreplabs_at_kidx = Vector{String}()
+        irlabs_at_kidx = Vector{String}()
         for tag in getindex.(brtags, kidx) # tag could be a combination like Γ1⊕2Γ₂ (or something simpler, like Γ₁)
             for irrep in split(tag, '⊕')
                 irrep′ = filter(!isdigit, irrep) # filter off any multiplicities
-                if irrep′ ∉ irreplabs_at_kidx
-                    push!(irreplabs_at_kidx, irrep′)
+                if irrep′ ∉ irlabs_at_kidx
+                    push!(irlabs_at_kidx, irrep′)
                 end
             end
         end
-        sort!(irreplabs_at_kidx)
-        append!(irreplabs, irreplabs_at_kidx)
+        sort!(irlabs_at_kidx)
+        append!(irlabs, irlabs_at_kidx)
     end
 
-    irrepvecs = [zeros(Int64, length(irreplabs)) for _=Base.OneTo(length(brtags))]
+    irvecs = [zeros(Int64, length(irlabs)) for _=Base.OneTo(length(brtags))]
     for (bridx, tags) in enumerate(brtags)
         for (kidx,tag) in enumerate(tags)
             for irrep in split(tag, '⊕') # note this irrep tag may contain numerical prefactors!
@@ -168,24 +76,39 @@ function get_irrepvecs(brtags)
                 else
                     prefac = parse(Int64, prefac_str)
                 end
-                irrep′ = read(buf, String) # the rest of the irrep buffer is the actual cdml label
+                ir′ = read(buf, String) # the rest of the irrep buffer is the actual cdml label
                 close(buf)
-                irrepidx = findfirst(==(irrep′), irreplabs) # find position in irreplabs vector
-                irrepvecs[bridx][irrepidx] = prefac
+                iridx = findfirst(==(ir′), irlabs) # find position in irlabs vector
+                irvecs[bridx][iridx] = prefac
             end
         end
     end
-    return irreplabs, irrepvecs
+    return irlabs, irvecs
 end
 
 
-# main "getter" function; reads data from csv files
-# TODO: Write documentation/method description.
-function bandreps(sgnum::Integer, allpaths::Bool=false, spinful::Bool=false, brtype::String="Elementary TR")
+"""
+    bandreps(sgnum::Integer; 
+             allpaths::Bool=false, spinful::Bool=false, timereversal::Bool=true)
+
+Returns the `BandRepSet` for space group `sgnum` (provided by the Bilbao Crystallographic
+Server; http://www.cryst.ehu.es/cgi-bin/cryst/programs/bandrep.pl)
+
+Keyword arguments:
+
+- `allpaths`: include a minimal sufficient set (`false`, default) or all (`true`) k-vectors. 
+- `spinful`: single- (`false`, default) or double-valued (`true`) irreps, as appropriate for
+             spinless and spinful particles, respectively.
+- `timereversal`: assume presence (`true`, default) or absence (`false`) of time-reversal
+                  symmetry.
+"""
+function bandreps(sgnum::Integer; 
+                  allpaths::Bool=false, spinful::Bool=false, timereversal::Bool=true)
     paths_str = allpaths ? "allpaths" : "maxpaths"
-    filename = (@__DIR__)*"/../data/bandreps/3d/$(filter(!isspace, brtype))/$(paths_str)/$(string(sgnum)).csv"
+    brtype_str = timereversal ? "elementaryTR" : "elementary"
+    filename = (@__DIR__)*"/../data/bandreps/3d/$(brtype_str)/$(paths_str)/$(string(sgnum)).csv"
     open(filename) do io
-        BRS = dlm2struct(io, sgnum, allpaths, spinful, brtype, BandRepTrait())
+        BRS = dlm2struct(io, sgnum, allpaths, spinful, timereversal)
     end 
 end
 
@@ -193,17 +116,17 @@ end
 """
     classification(BRS::BandRepSet) --> String
 
-Calculate the symmetry indicator classification of a band representation 
-set, meaning the index-classification inferrable on the basis of symmetry
-alone.
+Calculate the symmetry indicator classification of a band representation set, meaning the 
+index-classification inferrable on the basis of symmetry alone.
 
-Technically, the calculation answers a question like "what direct product 
-of Zₙ groups is the the quotient group Xᵇˢ = {BS}/{AI} isomorphic to?".
-See Po, Watanabe, & Vishwanath, Nature Commun. 8, 50 (2017).
+Technically, the calculation answers a question like "what direct product of ``Zₙ`` groups
+is the the quotient group ``Xᵇˢ = {BS}/{AI}`` isomorphic to?". 
+
+See e.g. Po, Watanabe, & Vishwanath, Nature Commun. 8, 50 (2017) for more information.
 """
 function classification(BRS::BandRepSet)
     Λ = smith(matrix(BRS)).SNF # get the diagonal components of the Smith normal decomposition
-    Λ .= abs.(Λ) # the sign has no significance; can be absorbed in T or S if M = T⁻¹ΛS
+    Λ .= abs.(Λ) # the sign has no significance; can be absorbed in T or S if M = SΛT (see _smith′(..))
     nontriv_idx = findall(x-> !(isone(x) || iszero(x)), Λ)
     if isempty(nontriv_idx)
         return "Z₁"
@@ -215,18 +138,65 @@ end
 """
     basisdim(BRS::BandRepSet) --> Int64
 
-Computes the dimension of the (linearly independent parts) of a 
-band representation set. This is dᵇˢ = dᵃⁱ in the notation of 
-Po, Watanabe, & Vishwanath, Nature Commun. 8, 50 (2017). In other words,
-this is the number of linearly independent basis vectors that span the 
-expansions of a band structure or atomic insulator viewed as symmetry-data.
+Computes the dimension of the (linearly independent parts) of a band representation set.
+This is ``dᵇˢ = dᵃⁱ`` in the notation of Po, Watanabe, & Vishwanath, Nature Commun. 8, 50
+(2017). In other words, this is the number of linearly independent basis vectors that span
+the expansions of a band structure or atomic insulator viewed as symmetry-data.
 """ 
 function basisdim(BRS::BandRepSet)
     Λ = smith(matrix(BRS)).SNF
-    nnz = sum(!iszero, Λ) # number of nonzeros in Smith normal diagonal matrix
+    nnz = count(!iszero, Λ) # number of nonzeros in Smith normal diagonal matrix
     return nnz
 end
 
+
+"""
+    _smith′(X::AbstractMatrix; inverse=true, debug=false, verify=false)
+
+Equivalent of `smith(A; inverse, debug, verify)` from the `SmithNormalForm` package, but 
+with guaranteed positivity of the diagonal SNF factors. The remaining signs are absorbed 
+into `F.T` and `F.Tinv`. 
+Returns a `SmithNormalForm.Smith` factorization `F`, such that 
+
+```
+    F.S*diagm(F)*F.T == X
+    diag(F.Sinv*X*F.Tinv) == F.SNF
+```
+
+with `diagm(F)` producing the diagonal matrix associated with `F.SNF` (with `F.SNF[i]` ≥ 0).
+
+Correctness of the sign-transformation can optionally be checked with kwarg `verify=true`.
+
+This is a small ad-hoc patch for https://github.com/wildart/SmithNormalForm.jl/issues/1.
+"""
+function _smith′(X::AbstractMatrix; inverse=true, debug=false, verify=false)
+    F = smith(X, inverse=inverse, debug=debug)
+    # smith and snf may currently return negative diagonal SNF values (here, denoted Λ): we
+    # prefer to have Λⱼ positive so we correct for that by absorbing the sign of Λ into T
+    # and T⁻¹, such that 
+    #    Λ′ = Λ*sign(Λ),   T′ = sign(Λ)*T,    and    T⁻¹′ = T⁻¹*sign(Λ),
+    # with the convention that sign(0) = 1. Then we still have that X = SΛT = SΛ′T′
+    # and also that Λ = S⁻¹XT⁻¹ ⇒ Λ′ = S⁻¹XT⁻¹′.
+    for j in eachindex(F.SNF)
+        Λⱼ = F.SNF[j]
+        if Λⱼ < 0
+            @views F.T[j,:]    .*= -1 # T′   = sign(Λ)*T    [rows]
+            @views F.Tinv[:,j] .*= -1 # T⁻¹′ = T⁻¹*sign(Λ)  [columns]
+            F.SNF[j] = abs(Λⱼ)        # Λ′ = Λ*sign(Λ)
+        end
+    end
+
+    # verify correctness of results
+    if verify
+        X′ = F.S*diagm(F)*F.T
+        Λ′ = diag(F.Sinv*X*F.Tinv)
+        if norm(X .- X′) > 0 || norm(F.SNF .- Λ′) > 0
+            throw("Unexpected failure of SNF positivity-enforcement")
+        end
+    end
+
+    return F
+end
 
 """
     wyckbasis(BRS::BandRepSet) --> Vector{Vector{Int64}}
@@ -239,61 +209,62 @@ Conversely, bands that cannot are topological, either fragily (some
 negative coefficients) or strongly (fractional coefficients).
 """
 function wyckbasis(BRS::BandRepSet) 
-    # Compute Smith normal form: for an n×m matrix A with integer elements,
+    # Compute Smith normal form: for an n×m matrix B with integer elements,
     # find matrices S, diagm(Λ), and T (of size n×n, n×m, and m×m, respectively)
-    # with integer elements such that A = S*diagm(Λ)*T. Λ is a vector
-    # [λ₁, λ₂, ..., λᵣ, 0, 0, ..., 0] with λⱼ divisible by λⱼ₊₁ and r ≤ min(n,m).
+    # with integer elements such that B = S*diagm(Λ)*T. Λ is a vector
+    # [λ₁, λ₂, ..., λᵣ, 0, 0, ..., 0] with λⱼ₊₁ divisible by λⱼ and r ≤ min(n,m).
     # The matrices T and S have integer-valued pseudo-inverses.
-    F = smith(matrix(BRS))
-    S, S⁻¹, T, T⁻¹, Λ = F.S, F.Sinv, F.T, F.Tinv, F.SNF
-    nnz = sum(!iszero, Λ) # number of nonzeros in Smith normal diagonal matrix
+    F = _smith′(matrix(BRS)) # Smith normal factorization with λⱼ ≥ 0
+    S, S⁻¹, Λ = F.S, F.Sinv, F.SNF
+    #T, T⁻¹ = F.T, F.Tinv,
+
+    nnz = count(!iszero, Λ) # number of nonzeros in Smith normal diagonal matrix
     nzidxs = Base.OneTo(nnz)
 
-    # If we apply T⁻¹ to a given set of (integer) symmetry data 𝐧, the result 
-    # should be  the (integer) factors qᵢCᵢ (Cᵢ=Λᵢ here) discussed in Tang, Po,
-    # [...], Nature Physics 15, 470 (2019). Conversely, the rows of T gives an integer-
-    # coefficient basis for all gapped band structures, while the rows of diagm(Λ)*T  
+    # If we apply S⁻¹ to a given set of (integer) symmetry data 𝐧, the result 
+    # should be the (integer) factors qᵢCᵢ (Cᵢ=Λᵢ here) discussed in Tang, Po,
+    # [...], Nature Physics 15, 470 (2019). Conversely, the rows of S gives an integer-
+    # coefficient basis for all gapped band structures, while the rows of S*diagm(Λ)
     # generates all atomic insulator band structures (assuming integer coefficients).
-    # TODO: Verify this and check your notes from meetings with Adrian Po.
     # See also your notes in scripts/derive_sg2_bandrep.jl
-    return T[nzidxs, :], diagm(F)[:,nzidxs], T⁻¹[nzidxs, :]
+    return S[:, nzidxs], diagm(F)[:,nzidxs], S⁻¹[:, nzidxs]
 end
 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 # ==============================   Some context   ==============================
-# The thing to remember here is that if A ≡ matrix(BRS), then A is in general a 
+# The thing to remember here is that if B ≡ matrix(BRS), then B is in general a 
 # linearly dependent basis for all atomic insulators. Suppose the symmetry data 
 # vector is 𝐧, then this means that there exists a coefficient vector ("into" the
-# rows of A) 𝐜, such that Aᵀ𝐜 = 𝐧, where 𝐜 has strictly positive integer coefficients 
+# cols of B) 𝐜, such that B𝐜 = 𝐧, where 𝐜 has strictly positive integer coefficients 
 # (corresponding to "stacking" of atomic bands). To get a linearly independent basis,
-# we seek the column space of A: this generates all possible 𝐧; the price we pay, 
-# though, is that in general the column space of A would also allow negative 
+# we seek the column space of B: this generates all possible 𝐧; the price we pay, 
+# though, is that in general the column space of B would also allow negative 
 # coefficients ("subtraction" of atomic bands). We could of course just get the 
 # column space from the SVD, but that would give us non-integral coefficients in 
 # general. Instead, we can use the Smith normal form noted above. Specifically,
-# the column space of A is T[:,1:r] with r number of nonzero λⱼ. This column 
+# the column space of B is S[:,1:r] with r number of nonzero λⱼ. This column 
 # space in fact generates both all atomic insulators and all fragile topological 
-# insulators (effectively, additions and subtractions of rows of A).
-# The trouble with distinguishing fragile and atomic insulators is that the rows of 
-# A are linearly dependent; and the span of A obtained from T[:,1:r] may already 
+# insulators (effectively, additions and subtractions of columns of B).
+# The trouble with distinguishing fragile and atomic insulators is that the columns of 
+# B are linearly dependent; and the span of B obtained from B[:,1:r] may already 
 # have included several subtractions. What we want to know is whether, for given 
-# 𝐧, there a positive-integer coefficient solution exists to Aᵀ𝐜 = 𝐧 or not: if we
+# 𝐧, there exists a positive-integer coefficient solution to B𝐜 = 𝐧 or not: if we
 # just find *some* negative-integer coefficient solution, then that doesn't mean
 # that there couldn't also be a positive-integer coefficient solution as well, simply
-# because the rows of A are linearly dependent.
-# One approach could be to find some solution 𝐜′, such that Aᵀ𝐜′=𝐧, which may contain
+# because the columns of B are linearly dependent.
+# One approach could be to find some solution 𝐜′, such that B𝐜′=𝐧, which may contain
 # negative coefficients. From this particular solution, we can generate all possible
-# solutions by adding elements from the null space A to 𝐜′: if we can identify an 
+# solutions by adding elements from the null space B to 𝐜′: if we can identify an 
 # element from the null space to add into 𝐜′ such that the result is positive, 
 # we have found solution (= an atomic insulator).
 # ==============================================================================
 # In searching on this topic, I came across the following KEY WORDS:
-#   - Linear system of Diophantine equations: any system Aᵀx=b with integer Aᵀ and b.
+#   - Linear system of Diophantine equations: any system Ax=b with integer A and b.
 #       See e.g. https://en.wikipedia.org/wiki/Diophantine_equation#Linear_Diophantine
 #   - Integer linear programming: concerned with solving integer-coefficient equations
 #       subject to conditions. We might phrase our problem as a "standard form linear
 #       programming" problem:
 #           minimize    𝐭ᵀ𝐜
-#           subject to  Aᵀ𝐜 = 𝐧
+#           subject to  B𝐜 = 𝐧
 #                       cᵢ ≥ 0
 #                       𝐜 ∈ 𝐙ⁿ
 #       where we would choose 𝐭 = (1,1,1,1, ...) with the idea of finding the solution
@@ -304,7 +275,8 @@ end
 #       It seems like this can be done in JuMP with GLPKSolverLP(). (or via GLPK.jl)
 #   - Semirings: technically, the problem is that the set of natural numbers ℕ = 0,1,...
 #       is not a ring, but a semiring (no additive inverse). There may be some packages
-#       out there that deal specifically with semirings?
+#       out there that deal specifically with semirings? Actually, since it has an identity
+#       element under addition (0) it is a monoid.
 #   - The monoid paper from Bernevig: https://arxiv.org/pdf/1905.03262.pdf
 #       This actually seems to be a very worthwhile starting point; they're attacking 
 #       exactly this point.

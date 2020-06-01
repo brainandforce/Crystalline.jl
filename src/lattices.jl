@@ -45,7 +45,7 @@ end
 # and 
 #   exp(iG⋅W⁻¹r) = exp(iGᵀW⁻¹r) = exp{i[(W⁻¹)ᵀG]ᵀ⋅r}
 """
-    levelsetlattice(sgnum::Integer, D::Integer=2, idxmax::NTuple=ntuple(i->2,dim))
+    levelsetlattice(sgnum::Integer, D::Integer=2, idxmax::NTuple=ntuple(i->2,D))
         --> UnityFourierLattice{D}
 
 Compute a "neutral"/uninitialized Fourier lattice basis, a UnityFourierLattice, consistent
@@ -66,7 +66,7 @@ remain in the "neutral" configuration, where all inter-orbit coefficients are un
 # Examples
 
 Compute a UnityFourierLattice, modulate it with random inter-orbit coefficients via `modulate`,
-and finally plot it:
+and finally plot it (requires `using PyPlot`):
 
 ```julia-repl
 julia> uflat = levelsetlattice(16, 2)
@@ -227,7 +227,7 @@ To compute the associated primitive basis vectors, see `primitivize(::DirectBasi
 # Examples
 
 A centered ('c') lattice from plane group 5 in 2D, plotted in its 
-conventional and primitive basis:
+conventional and primitive basis (requires `using PyPlot`):
 
 ```julia-repl
 julia> sgnum = 5; D = 2; cntr = centering(sgnum, D)  # 'c' (body-centered)
@@ -278,10 +278,10 @@ function primitivize(flat::AbstractFourierLattice{D}, cntr::Char) where D
 end
 
 """
-    modulate(flat::UnityFourierLattice{dim},
+    modulate(flat::UnityFourierLattice{D},
     modulation::AbstractVector{ComplexF64}=rand(ComplexF64, length(getcoefs(flat))),
     expon::Union{Nothing, Real}=nothing)
-                            --> ModulatedFourierLattice
+                            --> ModulatedFourierLattice{D}
 
 Derive a concrete, modulated Fourier lattice from `flat`, a UnityFourierLattice 
 struct (that contains the _interrelations_ between orbit coefficients), by 
@@ -308,7 +308,7 @@ function modulate(flat::UnityFourierLattice{D},
     if isnothing(modulation)
         Ncoefs = length(getcoefs(flat))
         mod_r, mod_ϕ = rand(Float64, Ncoefs), 2π.*rand(Float64, Ncoefs)
-        modulation = mod_r .* cis(mod_ϕ) # ≡ reⁱᵠ (pick modulus and phase uniformly random)
+        modulation = mod_r .* cis.(mod_ϕ) # ≡ reⁱᵠ (pick modulus and phase uniformly random)
     end
     orbits = getorbits(flat); orbitcoefs = getcoefs(flat); # unpacking ...
     
@@ -351,6 +351,12 @@ function normscale!(flat::ModulatedFourierLattice, expon::Real)
     return flat
 end
 
+# -----------------------------------------------------------------------------------------
+# The utilities and methods below are mostly used for plotting (see src/pyplotting.jl).
+# We keep them here since they do not depend on PyPlot and have more general utility in 
+# principle (e.g., exporting associated Meshes).
+
+
 """ 
     calcfourier(xyz, flat::AbstractFourierLattice) --> Float64
 
@@ -374,46 +380,13 @@ function calcfourier(xyz, orbits, orbitcoefs)
     return f
 end
 
-"""
-    plot(flat::AbstractFourierLattice, Rs::DirectBasis)
-
-Plots a lattice `flat::AbstractFourierLattice` with lattice vectors
-given by `Rs::DirectBasis`. Possible kwargs are (default in brackets) 
-
-- `N`: resolution [`100`]
-- `filling`: determine isovalue from relative filling fraction [`0.5`]
-- `isoval`: isovalue [nothing (inferred from `filling`)]
-- `repeat`: if not `nothing`, repeats the unit cell an integer number of times [`nothing`]
-- `fig`: figure handle to plot [`nothing`, i.e. opens a new figure]
-
-If both `filling` and `isoval` kwargs simultaneously not equal 
-to `nothing`, then `isoval` takes precedence.
-"""
-function plot(flat::AbstractFourierLattice, Rs::DirectBasis;
-              N::Integer=100, 
-              filling::Union{Real, Nothing}=0.5, 
-              isoval::Union{Real, Nothing}=nothing,
-              repeat::Union{Integer, Nothing}=nothing,
-              fig=nothing)
- 
-    xyz = range(-.5, .5, length=N)
-    vals = calcfouriergridded(xyz, flat, N)
-    if isnothing(isoval)
-        isoval = !isnothing(filling) ? quantile(Iterators.flatten(vals), filling) : zero(Float64)
-    end
-    plotiso(xyz,vals,isoval,Rs,repeat,fig)
-
-    return xyz,vals,isoval
-end
-
-
-function calcfouriergridded!(vals, xyz, flat::AbstractFourierLattice, 
-                             N::Integer=length(xyz))
+function calcfouriergridded!(vals, xyz, flat::AbstractFourierLattice{D}, 
+                             N::Integer=length(xyz)) where D
     f = (coords...)-> calcfourier(coords, flat)
     # evaluate f over all gridpoints via broadcasting
-    if dim(flat) == 2
+    if D == 2
         broadcast!(f, vals, reshape(xyz, (1,N)), reshape(xyz, (N,1)))
-    elseif dim(flat) == 3
+    elseif D == 3
         # TODO: verify--unclear if this leads to the right ordering of vals wrt x,y,z and plotting packages
         broadcast!(f, vals, reshape(xyz, (N,1,1)), reshape(xyz, (1,N,1)), reshape(xyz, (1,1,N)))
     end
@@ -423,76 +396,4 @@ function calcfouriergridded(xyz, flat::AbstractFourierLattice{D},
                             N::Integer=length(xyz)) where D
     vals = Array{Float64, D}(undef, ntuple(i->N, D)...)
     return calcfouriergridded!(vals, xyz, flat, N)
-end
-
-
-ivec(i,dim) = begin v=zeros(dim); v[i] = 1.0; return v end # helper function
-# show isocontour of data
-function plotiso(xyz, vals, isoval::Real=0.0, 
-                 Rs=ntuple(i->ivec(i,length(ndims(vals))), length(ndims(vals))),
-                 repeat::Union{Integer, Nothing}=nothing, 
-                 fig=nothing)  
-    dim = ndims(vals)
-    if dim == 2
-        # convert to a cartesian coordinate system rather than direct basis of Ri
-        N = length(xyz) 
-        X = broadcast((x,y) -> x*Rs[1][1] + y*Rs[2][1], reshape(xyz,(1,N)), reshape(xyz, (N,1)))
-        Y = broadcast((x,y) -> x*Rs[1][2] + y*Rs[2][2], reshape(xyz,(1,N)), reshape(xyz, (N,1)))
-        uc = [[0 0]; Rs[1]'; (Rs[1]+Rs[2])'; (Rs[2])'; [0 0]] .- (Rs[1]+Rs[2])'./2
-        pad = abs((-)(extrema(uc)...))/25
-
-        if isnothing(fig)
-            fig = plt.figure()
-        else
-            fig.clf()
-        end
-        fig.gca().contourf(X,Y,vals; 
-                           levels=[-1e12, isoval, 1e12],
-                           cmap=plt.get_cmap("gray",2))# is also good
-        fig.gca().contour(X,Y,vals,levels=[isoval], colors="w", linestyles="solid")
-        fig.gca().plot(uc[:,1], uc[:,2], color="C4",linestyle="solid")
-        fig.gca().scatter([0],[0],color="C4",s=30, marker="+")
-        
-
-        if !isnothing(repeat) # allow repetitions of unit cell in 2D
-            for r1 in -repeat:repeat
-                for r2 in -repeat:repeat
-                    if r1 == r2 == 0; continue; end
-                    offset = Rs[1].*r1 .+ Rs[2].*r2
-                    fig.gca().contourf(X.+offset[1],Y.+offset[2],vals,levels=[minimum(vals), isoval, maximum(vals)]; cmap=plt.get_cmap("gray",256)) #get_cmap(coolwarm,3) is also good
-                    fig.gca().contour(X.+offset[1],Y.+offset[2],vals,levels=[isoval], colors="w", linestyles="solid")
-                end
-            end
-            xd = -(-)(extrema(uc[:,1])...); yd = -(-)(extrema(uc[:,2])...)
-            plt.xlim([extrema(uc[:,1])...].+[-1,1].*repeat*xd.+[-1,1].*pad); 
-            plt.ylim([extrema(uc[:,2])...].+[-1,1].*repeat*yd.+[-1,1].*pad);
-        else
-            plt.xlim([extrema(uc[:,1])...].+[-1,1].*pad); plt.ylim([extrema(uc[:,2])...].+[-1,1].*pad);
-        end
-        fig.gca().set_aspect("equal", adjustable="box")
-        fig.gca().set_axis_off()
-
-    elseif dim == 3
-        scene=Scene()
-        Makie.contour!(scene, xyz,xyz,xyz, vals,
-                       levels=[isoval],colormap=:blues, linewidth=.1)
-        Makie.display(scene)
-
-        # marching cubes algorithm to find isosurfaces
-        algo = MarchingCubes(iso=isoval, eps=1e-3)
-        verts, faces = isosurface(vals, algo; 
-                                  origin = SVector(-0.5,-0.5,-0.5), 
-                                  widths = SVector(1.0,1.0,1.0))
-        verts′ = [verts[i][j] for i = 1:length(verts), j = 1:3]
-        faces′ = [faces[i][j] for i = 1:length(faces), j = 1:3]
-
-        #println("Mesh: $(length(verts)) vertices\n", " "^6, "$(length(faces)) faces")
-        isomesh = convert_arguments(Mesh, verts′, faces′)[1]
-
-        # plot isosurface
-        scene = Scene()
-        mesh!(isomesh, color=:grey)
-        display(scene)
-    end
-    return nothing
 end

@@ -1,4 +1,4 @@
-using SGOps, Test, LinearAlgebra
+using Crystalline, Test, LinearAlgebra
 
 if !isdefined(Main, :LGIRS′)
     LGIRS = get_all_lgirreps(Val(3))  # loaded from our saved .jld2 files
@@ -14,10 +14,10 @@ end
                 Nₒₚ = length(operations(ct))
 
                 # 1ˢᵗ orthogonality theorem:    ∑ᵢ|χᵢ⁽ᵃ⁾|² = Nₒₚ⁽ᵃ⁾
-                @test all(n->isapprox.(n, Nₒₚ, atol=1e-14), sum(abs2, χs, dims=2))
+                @test all(n->isapprox.(n, Nₒₚ, atol=1e-14), sum(abs2, χs, dims=1))
 
                 # 2ⁿᵈ orthogonality theorem:    ∑ᵢχᵢ⁽ᵃ⁾*χᵢ⁽ᵝ⁾ = δₐᵦNₒₚ⁽ᵃ⁾ 
-                @test conj(χs)*transpose(χs) ≈ Nₒₚ*I
+                @test χs'*χs ≈ Nₒₚ*I
             end
         end
     end
@@ -31,10 +31,10 @@ end
                 Nₒₚ = length(operations(ct))
 
                 # 1ˢᵗ orthogonality theorem:    ∑ᵢ|χᵢ⁽ᵃ⁾|² = Nₒₚ⁽ᵃ⁾
-                @test all(n->isapprox.(n, Nₒₚ, atol=1e-14), sum(abs2, χs, dims=2))
+                @test all(n->isapprox.(n, Nₒₚ, atol=1e-14), sum(abs2, χs, dims=1))
 
                 # 2ⁿᵈ orthogonality theorem:    ∑ᵢχᵢ⁽ᵃ⁾*χᵢ⁽ᵝ⁾ = δₐᵦNₒₚ⁽ᵃ⁾ 
-                @test conj(χs)*transpose(χs) ≈ Nₒₚ*I
+                @test χs'*χs ≈ Nₒₚ*I
             end
         end
     end

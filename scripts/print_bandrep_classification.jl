@@ -1,9 +1,7 @@
 allpaths = false
 spinful  = false
 for sgnum = 1:230
-    global BRS = bandreps(sgnum, allpaths, spinful, "Elementary TR")
-    display(BRS); 
-    #display(smith(matrix(BRS)).SNF)
+    BRS = bandreps(sgnum, allpaths=allpaths, spinful=spinful, timereversal=true)
+    display(BRS)
     display(classification(BRS))
-    #display(SGOps.humanreadable.(SGOps.reps(BRS)))
 end

@@ -1,9 +1,9 @@
-using SGOps, Test, LinearAlgebra, Printf
+using Crystalline, Test, LinearAlgebra
 
 if !isdefined(Main, :LGIRS) # load complex little groups, if not already loaded
     LGIRS = get_all_lgirreps(Val(3)) # ≡ parselittlegroupirreps()
 end
-#SGOps.add_ΦnotΩ_lgirs!.(LGIRS)
+#Crystalline.add_ΦnotΩ_lgirs!.(LGIRS)
 
 @testset "Irrep orthogonality (complex little groups)" begin
 
@@ -99,8 +99,8 @@ end
         end
 	end
 	if debug
-		print("\n\n$(count)/$(total) errored"); 
-		@printf(" (%.2f%%)\n\n", 100*count/total)
+        println("\n\n", count, "/", total, " errored",
+                " (", round(100*count/total, digits=1), "%)\n")
 	end
 end
 end

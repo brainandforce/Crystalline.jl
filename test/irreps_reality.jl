@@ -1,4 +1,4 @@
-using SGOps, Test #, Crayons
+using Crystalline, Test #, Crayons
 
 if !isdefined(Main, :LGIRS)
     LGIRS = parselittlegroupirreps()
@@ -20,7 +20,7 @@ end
                 #= catch err    # for debugging
                     if true
                         println(sgnum, ", ", 
-                                SGOps.subscriptify.(label(LGIRS[sgnum][kidx][iridx])), ", ", 
+                                Crystalline.subscriptify.(label(LGIRS[sgnum][kidx][iridx])), ", ", 
                                 centering(sgnum,3), ", ",
                                 issymmorph(sgnum))
                     end

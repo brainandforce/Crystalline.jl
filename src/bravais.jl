@@ -53,6 +53,7 @@ end
 
 """
     crystal(a)  --> DirectBasis{1}
+    
 Return a one-dimensional crystal with lattice period `a`.
 """
 crystal(a::Real) = DirectBasis(SVector{1,Float64}(1.0))
@@ -71,41 +72,6 @@ function isvalid_sphericaltriangle(α,β,γ)
     check1 = 0 < s < π;                     
     check2 = sin(s-α)*sin(s-β)*sin(s-γ) > 0 
     return check1 && check2 
-end
-
-
-const ORIGIN_MARKER_OPTS = (marker="o", markerfacecolor="white", markeredgecolor="black", 
-                            markeredgewidth=1.5, markersize=4.5)
-
-function plot(Rs::DirectBasis{D}) where D
-    if D == 1
-        plot([0, Rs[1]], [0, 0])
-        plot([0,], [0,]; ORIGIN_MARKER_OPTS...) # origin
-
-    elseif D == 2
-        corner = sum(Rs)
-        for R in Rs
-            plot([0, R[1]], [0, R[2]]; color="black") # basis vectors
-            plot([R[1], corner[1]], [R[2], corner[2]]; color="grey") # remaining unit cell boundaries
-        end
-        plot([0,], [0,]; ORIGIN_MARKER_OPTS...) # origin
-    elseif D == 3
-        corners = (Rs[1]+Rs[3], Rs[1]+Rs[2], Rs[2]+Rs[3])
-        dirs = ((-1,1,-1), (-1,-1,1), (1,-1,-1))
-        for (i,R) in enumerate(Rs)
-            plot3D([0, R[1]], [0, R[2]], [0, R[3]]; color="black") # basis vectors
-            for (corner,dir) in zip(corners,dirs) # remaining unit cell boundaries
-                plot3D([corner[1], corner[1]+dir[i]*R[1]], 
-                       [corner[2], corner[2]+dir[i]*R[2]], 
-                       [corner[3], corner[3]+dir[i]*R[3]]; color="grey")
-            end
-        end
-        plot3D([0,], [0,], [0,]; ORIGIN_MARKER_OPTS...) # origin
-        plt.gca().set_zlabel("z")
-    end
-    plt.gca().set_xlabel("x"); plt.gca().set_ylabel("y")
-    plt.gca().set_aspect("equal", adjustable="box") # seems broken in 3D (https://github.com/matplotlib/matplotlib/pull/13474)
-    return nothing
 end
 
 °(φ::Real) = deg2rad(φ)
@@ -233,11 +199,11 @@ function relrand(lims::NTuple{2,<:Real})
     low, high = lims; invlow = inv(low)
     lowthres = (invlow - 1.0)/(invlow + high - 2.0)
     if rand() < lowthres && low < 1.0   # smaller than 1.0
-        r = rand(Uniform(low,1.0))
+        r = rand(_Uniform(low,1.0))
     elseif high > 1.0                   # bigger than 1.0
-        r = rand(Uniform(1.0,high))
+        r = rand(_Uniform(1.0,high))
     else                                # default
-        return rand(Uniform(low,high))
+        return rand(_Uniform(low,high))
     end
 end
 relrand(lims::NTuple{2,<:Real}, N) = [relrand(lims) for i=Base.OneTo(N)]
@@ -261,6 +227,7 @@ oblique, monoclinic, & triclinic lattices).
 function directbasis(sgnum::Integer, D::Integer=3;
                      abclims::NTuple{2,Real}=(0.5,2.0), 
                      αβγlims::NTuple{2,Real}=(°(30),°(150)))
+    # TODO: This function should take `D` as `Val(D)` to be type-stable...
     system = crystalsystem(sgnum, D)
     if D == 1
         a = 1.0
@@ -277,7 +244,7 @@ function directbasis(sgnum::Integer, D::Integer=3;
             γ = °(120)
         elseif system == "oblique"     # no conditions (free: a,b,γ)
             a = 1.0;    b = relrand(abclims)
-            γ = rand(Uniform(αβγlims...)) 
+            γ = rand(_Uniform(αβγlims...)) 
         else 
             throw(DomainError(system))
         end
@@ -311,15 +278,16 @@ function directbasis(sgnum::Integer, D::Integer=3;
             α = β = γ = °(90)
         elseif system == "monoclinic"   # α=γ=90° (free: a,b,c,β≥90°)
             a = 1.0;            b, c = relrand(abclims, 2)
-            α = γ = °(90);      β = rand(Uniform(°(90), αβγlims[2]))
+            α = γ = °(90);      β = rand(_Uniform(°(90), αβγlims[2]))
             while !isvalid_sphericaltriangle(α,β,γ)  # arbitrary combinations of α,β,γ may not correspond 
-                β = rand(Uniform(°(90), αβγlims[2])) # to a valid axis-system; reroll until they do
+                β = rand(_Uniform(°(90), αβγlims[2])) # to a valid axis-system; reroll until they do
             end
         elseif system == "triclinic"    # no conditions (free: a,b,c,α,β,γ)
             a = 1.0;            b, c = relrand(abclims, 2)
-            α, β, γ = rand(Uniform(αβγlims...),3)
-            while !isvalid_sphericaltriangle(α,β,γ)   # arbitrary combinations of α,β,γ may not correspond 
-                α, β, γ = rand(Uniform(αβγlims...),3) # to a valid axis-system; reroll until they do
+            U = _Uniform(αβγlims...)
+            α, β, γ = rand(U), rand(U), rand(U)
+            while !isvalid_sphericaltriangle(α,β,γ) # arbitrary combinations of α,β,γ may not correspond 
+                α, β, γ = rand(U), rand(U), rand(U) # to a valid axis-system; reroll until they do
             end
         else 
             throw(DomainError(system))

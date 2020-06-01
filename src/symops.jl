@@ -597,7 +597,7 @@ function reduce_ops(ops::AbstractVector{SymOperation{D}}, cntr::Char, conv_or_pr
     P = primitivebasismatrix(cntr, D)
     ops′ = transform.(ops, Ref(P))         # equiv. to `primitivize.(ops, cntr)` [but avoids loading P anew for each SymOperation]
     # remove equivalent operations
-    ops′_reduced = SymOperation{D}.(uniquetol(matrix.(ops′), atol=SGOps.DEFAULT_ATOL))
+    ops′_reduced = SymOperation{D}.(uniquetol(matrix.(ops′), atol=Crystalline.DEFAULT_ATOL))
 
     if conv_or_prim # (true) return in conventional basis
         return transform.(ops′_reduced, Ref(inv(P))) # equiv. to conventionalize.(ops′_reduced, cntr)
@@ -771,7 +771,7 @@ function isnormal(opsᴳ::T, opsᴴ::T; verbose::Bool=false) where T<:AbstractVe
         for h in opsᴴ
             # check if ghg⁻¹ ∉ G
             h′ = g∘h∘g⁻¹
-            if !isapproxin(h′, opsᴴ, atol=SGOps.DEFAULT_ATOL)
+            if !isapproxin(h′, opsᴴ, atol=Crystalline.DEFAULT_ATOL)
                 if verbose
                     println("\nNormality-check failure:\n",
                             "Found h′ = ", seitz(h′), "\n",

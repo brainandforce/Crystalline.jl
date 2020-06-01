@@ -37,11 +37,9 @@ function fractionify!(io::IO, x::Number, forcesign::Bool=true, tol::Real=1e-4)
     end
     t = rationalize(float(x), tol=tol) # convert to "minimal" Rational fraction (within nearest 1e-4 neighborhood)
     if !isinteger(t)
-        show(io, abs(numerator(t)))
-        print(io, '/')
-        show(io, denominator(t))
+        print(io, abs(numerator(t)), '/', denominator(t))
     else
-        show(io, abs(numerator(t)))
+        print(io, abs(numerator(t)))
     end
     return nothing
 end
@@ -291,3 +289,17 @@ function ImmutableDict(ps::Pair{K,V}...) where {K,V}
     return d
 end
 ImmutableDict(ps::Pair...) = ImmutableDict(ps)
+
+
+# Distributions.jl provides a nice Uniform distribution type - but it is not worth adding
+# the high compilation-time of Distributions (~7 s) just for that functionality, so we just
+# copy a subset of the methods and the struct here, distinguishing the struct-pirating by an 
+# underscore. We only copy the scalar rand(..) methods (i.e. no array generators).
+struct _Uniform{T<:Real}
+    a::T # low
+    b::T # high (unchecked...)
+end
+_Uniform(a::Real, b::Real) = _Uniform(promote(a, b)...)
+_Uniform(a::Integer, b::Integer) = _Uniform(float(a), float(b))
+rand(u::_Uniform) = rand(Random.GLOBAL_RNG, u)
+rand(rng::Random.AbstractRNG, u::_Uniform) = u.a + (u.b - u.a) * rand(rng)
